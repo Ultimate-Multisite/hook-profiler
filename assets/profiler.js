@@ -2,12 +2,12 @@ window.WP_Hook_Profiler = (function($) {
     'use strict';
     
     let profileData = null;
+    let dataLoaded = false;
     let currentSort = { column: null, direction: 'desc' };
     
     function init() {
         $(document).ready(function() {
             bindEvents();
-            profileData = window.hook_profiler_data;
         });
     }
     
@@ -53,7 +53,6 @@ window.WP_Hook_Profiler = (function($) {
     function show() {
         $('#wp-hook-profiler-panel, #wp-hook-profiler-overlay').show();
         loadProfileData();
-
     }
     
     function hide() {
@@ -64,12 +63,97 @@ window.WP_Hook_Profiler = (function($) {
         return $('#wp-hook-profiler-panel').is(':visible');
     }
     
+    /**
+     * Fetch profiling data via AJAX on first open.
+     *
+     * Previously the full dataset was serialised as inline JSON on every page
+     * load (via wp_json_encode in render_debug_panel). On sites with many hooks
+     * this could be several MB of JSON embedded in the HTML, which was the
+     * primary cause of the PHP memory exhaustion reported in issue #2.
+     *
+     * Now the data is fetched lazily — only when the panel is actually opened —
+     * and only once per page load (dataLoaded guard).
+     */
     function loadProfileData() {
-        showLoading();
+        if (dataLoaded) {
+            // Data already fetched this page load; just re-render.
+            renderProfileData();
+            return;
+        }
 
+        showLoading();
+        showError(null);
+
+        $.ajax({
+            url: wpHookProfiler.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'wp_hook_profiler_data',
+                nonce: wpHookProfiler.nonce
+            },
+            success: function(response) {
+                if (response.success && response.data) {
+                    profileData = response.data;
+                    dataLoaded = true;
+                    renderProfileData();
+                    showMemoryWarnings();
+                } else {
+                    showError('Failed to load profiling data.');
+                    hideLoading();
+                }
+            },
+            error: function(xhr, status, error) {
+                showError('AJAX error: ' + error);
+                hideLoading();
+            }
+        });
+    }
+
+    function renderProfileData() {
         updateSummary();
         updateAllTables();
         hideLoading();
+    }
+
+    /**
+     * Show a notice in the panel when the profiler hit a memory or data cap
+     * during collection, so the user knows the data may be incomplete.
+     */
+    function showMemoryWarnings() {
+        if (!profileData) return;
+
+        const notices = [];
+
+        if (profileData.memory_paused) {
+            notices.push(
+                'Profiling was paused mid-request because PHP memory usage reached ' +
+                '80% of the memory_limit. Data shown is partial. ' +
+                'Increase memory_limit or reduce the number of active plugins to capture a full profile.'
+            );
+        }
+
+        if (profileData.callbacks_capped) {
+            notices.push(
+                'The callback limit (' + profileData.max_callbacks + ') was reached. ' +
+                'Some callbacks are not shown. Add ' +
+                '<code>add_filter(\'wp_hook_profiler_max_callbacks\', fn() => 1000);</code> ' +
+                'to your theme\'s functions.php to increase the limit.'
+            );
+        }
+
+        if (notices.length > 0) {
+            let noticeHtml = '<div class="wp-hook-profiler-notice">';
+            notices.forEach(function(msg) {
+                noticeHtml += '<p>' + msg + '</p>';
+            });
+            noticeHtml += '</div>';
+
+            // Insert after the summary bar, before the tab content.
+            const $summary = $('.wp-hook-profiler-summary');
+            if ($summary.length && !$('#wp-hook-profiler-notices').length) {
+                $summary.after('<div id="wp-hook-profiler-notices">' + noticeHtml + '</div>');
+            }
+        }
     }
     
     function showLoading() {
