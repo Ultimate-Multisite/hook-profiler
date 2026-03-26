@@ -154,7 +154,7 @@ class WP_Hook_Profiler_Engine {
         
         return [
             'plugins' => $this->timing_data,
-            'callbacks' => array_slice($callback_data, 0, 150),
+            'callbacks' => $callback_data,
             'plugin_loading' => $plugin_loading_data,
             'total_hooks' => $this->hook_count,
             'total_execution_time' => $this->total_execution_time,

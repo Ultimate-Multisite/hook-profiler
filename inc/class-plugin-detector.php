@@ -47,6 +47,13 @@ class WP_Hook_Profiler_Plugin_Detector {
             if ($theme_info) {
                 return array_merge($source_info, $theme_info);
             }
+
+            // MU-plugins must be checked before the core fallback so they are
+            // attributed to their own slug rather than bucketed as "WordPress Core".
+            $mu_plugin_info = $this->match_file_to_mu_plugin($filename);
+            if ($mu_plugin_info) {
+                return array_merge($source_info, $mu_plugin_info);
+            }
             
             if ($this->is_wordpress_core($filename)) {
                 return $source_info;
@@ -95,22 +102,25 @@ class WP_Hook_Profiler_Plugin_Detector {
         
         foreach ($plugins as $plugin_file => $plugin_data) {
             try {
-                $plugin_dir = dirname(WP_PLUGIN_DIR . '/' . $plugin_file);
-
-                if (!str_contains($plugin_file, '/')) {
-                    if ($filename === $plugin_file) {
+                if (strpos($plugin_file, '/') === false) {
+                    // Single-file plugin (e.g. hello.php): compare absolute paths
+                    if ($filename === WP_PLUGIN_DIR . '/' . $plugin_file) {
                         return [
                             'plugin' => $this->get_plugin_slug($plugin_file),
                             'plugin_name' => $this->safe_get_plugin_name($plugin_data, $plugin_file),
                             'plugin_file' => $plugin_file
                         ];
                     }
-                } else if (strpos($filename, $plugin_dir) === 0) {
-                    return [
-                        'plugin' => $this->get_plugin_slug($plugin_file),
-                        'plugin_name' => $this->safe_get_plugin_name($plugin_data, $plugin_file),
-                        'plugin_file' => $plugin_file
-                    ];
+                } else {
+                    // Directory plugin: require trailing slash to prevent foo matching foo-bar
+                    $plugin_dir = dirname(WP_PLUGIN_DIR . '/' . $plugin_file) . '/';
+                    if (strpos($filename, $plugin_dir) === 0) {
+                        return [
+                            'plugin' => $this->get_plugin_slug($plugin_file),
+                            'plugin_name' => $this->safe_get_plugin_name($plugin_data, $plugin_file),
+                            'plugin_file' => $plugin_file
+                        ];
+                    }
                 }
             } catch (Exception $e) {
                 // Skip this plugin if there's an error processing it
@@ -167,8 +177,22 @@ class WP_Hook_Profiler_Plugin_Detector {
     
     private function is_wordpress_core($filename) {
         return strpos($filename, $this->wp_core_path) === 0 ||
-               strpos($filename, ABSPATH . 'wp-admin/') === 0 ||
-               strpos($filename, ABSPATH . 'wp-content/mu-plugins/') === 0;
+               strpos($filename, ABSPATH . 'wp-admin/') === 0;
+    }
+
+    private function match_file_to_mu_plugin($filename) {
+        $mu_plugin_dir = defined('WPMU_PLUGIN_DIR') ? WPMU_PLUGIN_DIR : ABSPATH . 'wp-content/mu-plugins';
+        if (strpos($filename, $mu_plugin_dir . '/') !== 0) {
+            return null;
+        }
+        $relative = substr($filename, strlen($mu_plugin_dir) + 1);
+        $parts    = explode('/', $relative);
+        $slug     = count($parts) > 1 ? $parts[0] : pathinfo($parts[0], PATHINFO_FILENAME);
+        return [
+            'plugin'      => 'mu-plugin-' . $slug,
+            'plugin_name' => ucwords(str_replace(['-', '_'], ' ', $slug)) . ' (MU)',
+            'plugin_file' => null,
+        ];
     }
     
     private function get_plugins_data() {
@@ -231,8 +255,8 @@ class WP_Hook_Profiler_Plugin_Detector {
     
     private function unknown_source($file = null, $line = null) {
         return [
-            'plugin' => $file && str_contains($file,'multisite-ultimate')? 'Multisite Ultimate': 'unknown',
-            'plugin_name' => $file && str_contains($file,'multisite-ultimate')? 'multisite-ultimate.php': 'unknown',
+            'plugin' => $file && strpos($file, 'multisite-ultimate') !== false ? 'Multisite Ultimate' : 'unknown',
+            'plugin_name' => $file && strpos($file, 'multisite-ultimate') !== false ? 'multisite-ultimate.php' : 'unknown',
             'plugin_file' => null,
             'file' => $file,
             'line' => $line

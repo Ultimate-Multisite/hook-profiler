@@ -188,7 +188,7 @@ window.WP_Hook_Profiler = (function($) {
                 const timeClass = getTimeColorClass(timeMs);
                 
                 const callbackItem = $(`
-                    <div class="wp-hook-profiler-callback-item">
+                    <div class="wp-hook-profiler-callback-item" data-plugin="${escapeHtml(callback.plugin_name || callback.plugin)}">
                         <div class="wp-hook-profiler-callback-info">
                             <div class="wp-hook-profiler-callback-name">${escapeHtml(callback.callback)}</div>
                             <div class="wp-hook-profiler-callback-meta">
@@ -310,18 +310,17 @@ window.WP_Hook_Profiler = (function($) {
             let visibleCallbackCount = 0;
 
             if (pluginFilter) {
-                // Filter individual callbacks within this hook group
+                // Filter individual callbacks within this hook group using exact data-plugin match
                 const callbackItems = $(this).find('.wp-hook-profiler-callback-item');
                 callbackItems.each(function() {
-                    const callbackMeta = $(this).find('.wp-hook-profiler-callback-meta');
-                    const metaText = callbackMeta.text();
+                    const callbackPlugin = $(this).data('plugin');
+                    const matchesPlugin = callbackPlugin === pluginFilter;
 
-                    // Check if this callback matches the plugin filter
-                    const matchesPlugin = metaText.includes(`Plugin: ${pluginFilter}`) ||
-                                        metaText.toLowerCase().includes(`plugin: ${pluginFilter.toLowerCase()}`) ||
-                                        metaText.toLowerCase().includes(pluginFilter.toLowerCase());
+                    // Also apply search term at callback level when plugin filter is active
+                    const callbackName = $(this).find('.wp-hook-profiler-callback-name').text().toLowerCase();
+                    const matchesCallbackSearch = !searchTerm || hookName.includes(searchTerm) || callbackName.includes(searchTerm);
 
-                    if (matchesPlugin) {
+                    if (matchesPlugin && matchesCallbackSearch) {
                         hookHasMatchingCallbacks = true;
                         visibleCallbackCount++;
                         $(this).show();
