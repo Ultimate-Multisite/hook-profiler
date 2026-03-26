@@ -254,12 +254,13 @@ class WP_Hook_Profiler_Plugin_Detector {
     }
     
     private function unknown_source($file = null, $line = null) {
+        $is_multisite_ultimate = $file && strpos($file, 'multisite-ultimate') !== false;
         return [
-            'plugin' => $file && strpos($file, 'multisite-ultimate') !== false ? 'Multisite Ultimate' : 'unknown',
-            'plugin_name' => $file && strpos($file, 'multisite-ultimate') !== false ? 'multisite-ultimate.php' : 'unknown',
+            'plugin'      => $is_multisite_ultimate ? 'multisite-ultimate' : 'unknown',
+            'plugin_name' => $is_multisite_ultimate ? 'Multisite Ultimate' : 'unknown',
             'plugin_file' => null,
-            'file' => $file,
-            'line' => $line
+            'file'        => $file,
+            'line'        => $line
         ];
     }
 }

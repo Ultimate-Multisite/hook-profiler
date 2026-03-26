@@ -7,6 +7,10 @@ window.WP_Hook_Profiler = (function($) {
     function init() {
         $(document).ready(function() {
             bindEvents();
+            if (typeof window.hook_profiler_data === 'undefined' || !window.hook_profiler_data) {
+                showError('Hook profiler data is not available.');
+                return;
+            }
             profileData = window.hook_profiler_data;
         });
     }
@@ -427,7 +431,7 @@ window.WP_Hook_Profiler = (function($) {
         tbody.empty();
         
         // Sort by duration descending
-        loadingData.sort(([,a], [,b]) => b.duration - a.duration);
+        loadingData.sort(([,a], [,b]) => (b.duration || 0) - (a.duration || 0));
         
         let totalLoadingTime = 0;
         let sunriseTime = 0;
@@ -436,7 +440,7 @@ window.WP_Hook_Profiler = (function($) {
         let pluginsTime = 0;
         
         loadingData.forEach(([file, data]) => {
-            const durationMs = data.duration; // Duration is already in milliseconds
+            const durationMs = (data.duration || 0); // Duration is already in milliseconds; guard against undefined/null
             const timeClass = getTimeColorClass(durationMs);
             totalLoadingTime += durationMs;
             
