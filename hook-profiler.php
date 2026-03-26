@@ -122,9 +122,10 @@ class WP_Hook_Profiler {
             return;
         }
 
-		echo '<script>var hook_profiler_data = '.wp_json_encode($this->profiler->get_profile_data()).'</script>';
-
-        
+        // Do NOT inline the full profile data as JSON here.
+        // On sites with many hooks the serialized payload can be several MB,
+        // which is the primary cause of the PHP memory exhaustion reported in
+        // issue #2. The panel now fetches data lazily via AJAX when opened.
         include WP_HOOK_PROFILER_DIR . 'views/debug-panel.php';
     }
     

@@ -14,10 +14,47 @@ class WP_Hook_Profiler_Engine {
     private $hook_depth = 0;
     private $max_hook_depth = 500;
 
+    /**
+     * Maximum number of unique callback+hook pairs to track.
+     * Prevents unbounded growth of callback_aggregates on sites with many hooks.
+     * Configurable via the 'wp_hook_profiler_max_callbacks' filter.
+     */
+    private $max_callbacks = 500;
+
+    /**
+     * Maximum number of unique hook names stored per plugin in timing_data['hooks'].
+     * Prevents O(hooks × plugins) memory growth on sites with many hooks/plugins.
+     * Configurable via the 'wp_hook_profiler_max_hooks_per_plugin' filter.
+     */
+    private $max_hooks_per_plugin = 100;
+
+    /**
+     * Memory usage threshold (fraction of PHP memory_limit) at which profiling
+     * is automatically paused to prevent OOM. E.g. 0.80 = pause at 80% usage.
+     * Configurable via the 'wp_hook_profiler_memory_threshold' filter.
+     */
+    private $memory_threshold = 0.80;
+
+    /**
+     * Whether profiling was paused due to memory pressure.
+     */
+    public $memory_paused = false;
+
+    /**
+     * PHP memory limit in bytes (resolved once at construction time).
+     */
+    private $php_memory_limit = 0;
+
     public function __construct() {
         require_once WP_HOOK_PROFILER_DIR . 'inc/class-plugin-detector.php';
         require_once WP_HOOK_PROFILER_DIR . 'inc/class-callback-wrapper.php';
         $this->plugin_detector = new WP_Hook_Profiler_Plugin_Detector();
+        $this->php_memory_limit = $this->resolve_memory_limit();
+
+        // Allow site owners to tune limits without editing source.
+        $this->max_callbacks        = (int) apply_filters( 'wp_hook_profiler_max_callbacks',        $this->max_callbacks );
+        $this->max_hooks_per_plugin = (int) apply_filters( 'wp_hook_profiler_max_hooks_per_plugin', $this->max_hooks_per_plugin );
+        $this->memory_threshold     = (float) apply_filters( 'wp_hook_profiler_memory_threshold',   $this->memory_threshold );
     }
     
     public function start_profiling() {
@@ -36,6 +73,12 @@ class WP_Hook_Profiler_Engine {
         }
 
         if ($this->recursion_guard) {
+            return;
+        }
+
+        // Pause profiling if memory usage is approaching the PHP limit.
+        if ($this->is_memory_critical()) {
+            $this->memory_paused = true;
             return;
         }
         
@@ -91,6 +134,43 @@ class WP_Hook_Profiler_Engine {
 			}
 		}
     }
+
+    /**
+     * Returns true when memory usage has exceeded the configured threshold.
+     * Uses a fast integer comparison; no string parsing at call time.
+     */
+    private function is_memory_critical() {
+        if ($this->php_memory_limit <= 0) {
+            return false;
+        }
+        return memory_get_usage(true) >= (int) ($this->php_memory_limit * $this->memory_threshold);
+    }
+
+    /**
+     * Resolve the PHP memory_limit ini value to bytes.
+     * Returns 0 if the limit is -1 (unlimited) or cannot be parsed.
+     */
+    private function resolve_memory_limit() {
+        $raw = ini_get('memory_limit');
+        if ($raw === false || $raw === '' || $raw === '-1') {
+            return 0;
+        }
+        $raw   = trim($raw);
+        $value = (int) $raw;
+        $unit  = strtolower(substr($raw, -1));
+        switch ($unit) {
+            case 'g':
+                $value *= 1024 * 1024 * 1024;
+                break;
+            case 'm':
+                $value *= 1024 * 1024;
+                break;
+            case 'k':
+                $value *= 1024;
+                break;
+        }
+        return $value;
+    }
     
     
     public function get_plugin_info_safe($callback) {
@@ -135,6 +215,25 @@ class WP_Hook_Profiler_Engine {
     public function get_callback_reflection($callback) {
         return $this->plugin_detector->get_callback_reflection($callback);
     }
+
+    /**
+     * Returns true when the callback_aggregates map has reached its cap.
+     * Called by WP_Hook_Profiler_Callback_Wrapper before creating a new entry.
+     */
+    public function is_callbacks_cap_reached() {
+        return count($this->callback_aggregates) >= $this->max_callbacks;
+    }
+
+    /**
+     * Returns true when the hooks list for a given plugin has reached its cap.
+     * Called by WP_Hook_Profiler_Callback_Wrapper before appending a hook name.
+     */
+    public function is_hooks_per_plugin_cap_reached($plugin_key) {
+        if (!isset($this->timing_data[$plugin_key])) {
+            return false;
+        }
+        return count($this->timing_data[$plugin_key]['hooks']) >= $this->max_hooks_per_plugin;
+    }
     
     public function get_profile_data() {
         uasort($this->timing_data, function($a, $b) {
@@ -151,13 +250,29 @@ class WP_Hook_Profiler_Engine {
         if (function_exists('wp_hook_profiler_get_timing_data')) {
             $plugin_loading_data = wp_hook_profiler_get_timing_data();
         }
+
+        // Strip the hooks array from plugin data before returning — it can be
+        // very large and is not needed by the UI (the callbacks tab covers it).
+        $plugins_summary = [];
+        foreach ($this->timing_data as $key => $data) {
+            $plugins_summary[$key] = [
+                'total_time'     => $data['total_time'],
+                'hook_count'     => $data['hook_count'],
+                'callback_count' => $data['callback_count'],
+                'plugin_name'    => $data['plugin_name'],
+                'plugin_file'    => $data['plugin_file'],
+            ];
+        }
         
         return [
-            'plugins' => $this->timing_data,
-            'callbacks' => array_slice($callback_data, 0, 150),
-            'plugin_loading' => $plugin_loading_data,
-            'total_hooks' => $this->hook_count,
+            'plugins'           => $plugins_summary,
+            'callbacks'         => array_slice($callback_data, 0, 150),
+            'plugin_loading'    => $plugin_loading_data,
+            'total_hooks'       => $this->hook_count,
             'total_execution_time' => $this->total_execution_time,
+            'memory_paused'     => $this->memory_paused,
+            'callbacks_capped'  => count($this->callback_aggregates) >= $this->max_callbacks,
+            'max_callbacks'     => $this->max_callbacks,
         ];
     }
     

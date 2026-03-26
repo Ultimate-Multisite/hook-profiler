@@ -91,10 +91,48 @@ But it is only recommended to have it active while actively testing. Deactivate 
 - Check that JavaScript is enabled in your browser
 - Verify that AJAX requests are working (check browser console for errors)
 
-### High Memory Usage
-- The profiler stores timing data in memory during page execution
-- For sites with many hooks, consider using only when needed
-- Deactivate the plugin when not actively profiling
+### High Memory Usage / PHP Fatal: Allowed memory size exhausted
+
+The profiler collects data in PHP memory during the request. On sites with many
+plugins and hooks this can exhaust the default 256 MB limit. Several safeguards
+are built in:
+
+**Automatic memory guard** — profiling pauses automatically when PHP memory
+usage reaches 80 % of `memory_limit`. A warning banner appears in the panel
+when this happens. You can tune the threshold:
+
+```php
+// In your theme's functions.php or a mu-plugin:
+add_filter( 'wp_hook_profiler_memory_threshold', fn() => 0.70 ); // pause at 70 %
+```
+
+**Callback cap** — only the first 500 unique callback+hook pairs are tracked.
+Once the cap is reached, new callbacks are still executed and their time is
+counted in the total, but no new per-callback entry is created. A warning
+banner appears in the panel when the cap is hit. Raise it if needed:
+
+```php
+add_filter( 'wp_hook_profiler_max_callbacks', fn() => 1000 );
+```
+
+**Per-plugin hook list cap** — each plugin's hook list is capped at 100 entries
+to prevent O(hooks × plugins) memory growth. Raise it if needed:
+
+```php
+add_filter( 'wp_hook_profiler_max_hooks_per_plugin', fn() => 200 );
+```
+
+**Lazy data loading** — the profiling panel no longer embeds the full dataset
+as inline JSON on every page load. Data is fetched via AJAX only when you open
+the panel, eliminating the serialisation overhead that previously caused OOM
+errors at render time.
+
+If you still hit memory limits after tuning the filters, increase PHP's
+`memory_limit` in `php.ini` or `wp-config.php`:
+
+```php
+define( 'WP_MEMORY_LIMIT', '512M' );
+```
 
 ### Performance Impact
 - The profiler adds minimal overhead but does measure every hook

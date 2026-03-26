@@ -307,6 +307,28 @@
     border: 1px solid #f5c6cb;
 }
 
+/* Memory / data-cap warning notice shown when profiling was paused or capped */
+.wp-hook-profiler-notice {
+    background: #fff3cd;
+    color: #664d03;
+    padding: 10px 20px;
+    margin: 0;
+    border-bottom: 1px solid #ffecb5;
+    font-size: 13px;
+}
+
+.wp-hook-profiler-notice p {
+    margin: 6px 0;
+}
+
+.wp-hook-profiler-notice code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
 /* Plugin Loading Tab Styles */
 .wp-hook-profiler-file-name {
     font-family: 'Courier New', monospace;
