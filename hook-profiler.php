@@ -20,11 +20,29 @@ define('WP_HOOK_PROFILER_FILE', __FILE__);
 define('WP_HOOK_PROFILER_DIR', plugin_dir_path(__FILE__));
 define('WP_HOOK_PROFILER_URL', plugin_dir_url(__FILE__));
 
+/**
+ * Main plugin class for WP Hook Profiler.
+ *
+ * Bootstraps the profiling engine, registers WordPress hooks for the admin bar
+ * menu, asset enqueueing, AJAX data endpoint, and the debug panel overlay.
+ * Also handles plugin activation and deactivation lifecycle (mu-plugin copy and
+ * sunrise.php modification for early-boot timing).
+ *
+ * @since 1.0.0
+ */
 class WP_Hook_Profiler {
     
+    /** @var WP_Hook_Profiler|null Singleton instance. */
     private static $instance = null;
+
+    /** @var WP_Hook_Profiler_Engine The profiling engine instance. */
     private WP_Hook_Profiler_Engine $profiler;
     
+    /**
+     * Return (and lazily create) the singleton instance.
+     *
+     * @return WP_Hook_Profiler
+     */
     public static function instance() {
         if (self::$instance === null) {
             self::$instance = new self();
@@ -32,10 +50,18 @@ class WP_Hook_Profiler {
         return self::$instance;
     }
     
+    /**
+     * Private constructor — use {@see WP_Hook_Profiler::instance()} instead.
+     */
     private function __construct() {
         $this->init();
     }
     
+    /**
+     * Register all WordPress hooks required by the plugin.
+     *
+     * @return void
+     */
     private function init() {
         $this->load_profiler();
         add_action('admin_bar_menu', [$this, 'add_admin_bar_menu'], 999);
@@ -52,12 +78,26 @@ class WP_Hook_Profiler {
 
     }
     
+    /**
+     * Require and instantiate the profiling engine, then start profiling.
+     *
+     * @return void
+     */
     public function load_profiler() {
         require_once WP_HOOK_PROFILER_DIR . 'inc/class-hook-profiler-engine.php';
         $this->profiler = new WP_Hook_Profiler_Engine();
         $this->profiler->start_profiling();
     }
     
+    /**
+     * Add a summary node to the WordPress admin bar (admins only).
+     *
+     * Displays the total number of profiled hooks and their cumulative
+     * execution time in milliseconds. Clicking the node toggles the debug panel.
+     *
+     * @param WP_Admin_Bar $wp_admin_bar The admin bar instance provided by WordPress.
+     * @return void
+     */
     public function add_admin_bar_menu($wp_admin_bar) {
         if (!current_user_can('manage_options')) {
             return;
@@ -81,6 +121,14 @@ class WP_Hook_Profiler {
         ]);
     }
     
+    /**
+     * Enqueue the plugin's stylesheet and JavaScript on both front-end and admin pages.
+     *
+     * The script is localised with the AJAX URL and a nonce so the debug panel
+     * can fetch profiling data on demand.
+     *
+     * @return void
+     */
     public function enqueue_assets() {
         wp_enqueue_style(
             'wp-hook-profiler', 
@@ -103,6 +151,14 @@ class WP_Hook_Profiler {
         ]);
     }
     
+    /**
+     * Handle the AJAX request that returns profiling data to the debug panel.
+     *
+     * Verifies the nonce and capability before delegating to the engine.
+     * Responds with JSON via {@see wp_send_json_success()} or {@see wp_send_json_error()}.
+     *
+     * @return void
+     */
     public function ajax_get_profiler_data() {
         check_ajax_referer('wp_hook_profiler_nonce', 'nonce');
         
@@ -117,6 +173,14 @@ class WP_Hook_Profiler {
         wp_send_json_success($this->profiler->get_profile_data());
     }
     
+    /**
+     * Output the debug panel HTML in the page footer (admins only).
+     *
+     * Inlines the current profile data as a JSON script tag so the panel has
+     * immediate access to the data without an additional AJAX round-trip.
+     *
+     * @return void
+     */
     public function render_debug_panel() {
         if (!current_user_can('manage_options')) {
             return;
@@ -129,7 +193,12 @@ class WP_Hook_Profiler {
     }
     
     /**
-     * Plugin activation hook
+     * Plugin activation hook.
+     *
+     * Copies the mu-plugin timing shim and optionally modifies sunrise.php to
+     * capture early-boot timing data.
+     *
+     * @return void
      */
     public static function activate() {
 		self::create_mu_plugin();
@@ -137,13 +206,24 @@ class WP_Hook_Profiler {
     }
     
     /**
-     * Plugin deactivation hook
+     * Plugin deactivation hook.
+     *
+     * Removes the mu-plugin timing shim and restores the original sunrise.php.
+     *
+     * @return void
      */
     public static function deactivate() {
 		self::delete_mu_plugin();
         self::restore_sunrise_php();
     }
 
+    /**
+     * Copy the mu-plugin timing shim into WPMU_PLUGIN_DIR.
+     *
+     * Creates the mu-plugins directory if it does not already exist.
+     *
+     * @return void
+     */
 	public static function create_mu_plugin() {
 		if (!is_dir(WPMU_PLUGIN_DIR)) {
 			mkdir(WPMU_PLUGIN_DIR);
@@ -153,6 +233,11 @@ class WP_Hook_Profiler {
 
 	}
 
+    /**
+     * Remove the mu-plugin timing shim from WPMU_PLUGIN_DIR if it exists.
+     *
+     * @return void
+     */
 	public static function delete_mu_plugin() {
 		if (file_exists(WPMU_PLUGIN_DIR .'/aaaaa-wp-hook-profiler-timing.php')) {
 			unlink(WPMU_PLUGIN_DIR .'/aaaaa-wp-hook-profiler-timing.php');
@@ -160,7 +245,13 @@ class WP_Hook_Profiler {
 	}
     
     /**
-     * Modify sunrise.php to add timing code
+     * Modify sunrise.php to add timing code at the beginning and end of the file.
+     *
+     * A backup of the original file is created before any modifications are made.
+     * If sunrise.php does not exist, or if the timing code is already present,
+     * this method returns early without making changes.
+     *
+     * @return void
      */
     private static function modify_sunrise_php() {
         $sunrise_path = WP_CONTENT_DIR . '/sunrise.php';
@@ -201,7 +292,11 @@ class WP_Hook_Profiler {
     }
     
     /**
-     * Restore original sunrise.php
+     * Restore the original sunrise.php from the backup created during activation.
+     *
+     * If no backup exists this method is a no-op.
+     *
+     * @return void
      */
     private static function restore_sunrise_php() {
         $sunrise_path = WP_CONTENT_DIR . '/sunrise.php';
