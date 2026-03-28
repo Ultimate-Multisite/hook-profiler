@@ -61,7 +61,7 @@ No linter is configured. Follow WordPress Coding Standards manually.
 
 ### File Organisation
 
-```
+```text
 hook-profiler.php                              # Main plugin file, singleton bootstrap, hooks
 inc/
   class-hook-profiler-engine.php               # Core profiling engine, hooks into 'all' pseudo-hook
@@ -120,7 +120,7 @@ WP_HOOK_PROFILER_URL        // Plugin directory URL
 
 - The engine uses a recursion guard (`$recursion_guard`) to prevent re-entrant profiling
 - Hook depth is capped at 500 (`$max_hook_depth`) to prevent stack overflows
-- Plugin detection wraps Reflection calls in try/catch, falling back to "unknown" source
+- Plugin detection wraps Reflection calls in try/catch; on failure returns an `unknown` plugin marker (or `multisite-ultimate` if the file path contains `multisite-ultimate`)
 - The callback wrapper guards against non-finite timing values
 
 ### WordPress Requirements
