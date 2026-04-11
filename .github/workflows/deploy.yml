@@ -1,0 +1,114 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  PLUGIN_SLUG: hook-profiler
+
+jobs:
+  build-and-release:
+    name: Build and Create Release
+    runs-on: ubuntu-latest
+    if: github.repository == 'Ultimate-Multisite/hook-profiler'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          # Check plugin header matches tag
+          PLUGIN_VERSION=$(grep -oP '^\s*\*?\s*Version:\s*\K.*' ${PLUGIN_SLUG}.php | tr -d '[:space:]')
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Plugin header version ($PLUGIN_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          # Check version constant matches tag
+          CONST_VERSION=$(grep -oP "define\(\s*'WP_HOOK_PROFILER_VERSION'\s*,\s*'\K[^']+" ${PLUGIN_SLUG}.php)
+          if [ "$CONST_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::WP_HOOK_PROFILER_VERSION constant ($CONST_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          # Check readme.txt Stable tag matches
+          README_VERSION=$(grep -oP '^Stable tag:\s*\K.*' readme.txt | tr -d '[:space:]')
+          if [ "$README_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::readme.txt Stable tag ($README_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          # Check readme.txt has a changelog entry for this version
+          if ! grep -qP "^=\s+\Q${TAG_VERSION}\E[\s=]" readme.txt; then
+            echo "::error::readme.txt has no changelog entry for version $TAG_VERSION"
+            exit 1
+          fi
+
+          # Check package.json matches tag
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          # Check VERSION file matches tag
+          FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::VERSION file ($FILE_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+          echo "All version checks passed: $TAG_VERSION"
+
+      - name: Build plugin zip
+        run: |
+          mkdir -p build/${PLUGIN_SLUG}
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.agents' \
+            --exclude='.beads' \
+            --exclude='AGENTS.md' \
+            --exclude='CHANGELOG.md' \
+            --exclude='MODELS.md' \
+            --exclude='TODO.md' \
+            --exclude='todo' \
+            --exclude='migrations' \
+            --exclude='schemas' \
+            --exclude='seeds' \
+            --exclude='wp-cli.yml' \
+            --exclude='.aidevops.json' \
+            --exclude='.cursorrules' \
+            --exclude='.clinerules' \
+            --exclude='.windsurfrules' \
+            --exclude='.gitattributes' \
+            --exclude='.gitignore' \
+            --exclude='package.json' \
+            --exclude='VERSION' \
+            --exclude='build' \
+            . build/${PLUGIN_SLUG}/
+          cd build
+          zip -r ../${PLUGIN_SLUG}.zip ${PLUGIN_SLUG}/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN_SLUG }}-zip
+          path: ${{ env.PLUGIN_SLUG }}.zip
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PLUGIN_SLUG }}.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
